@@ -25,7 +25,7 @@ const INDUSTRIES = [
   "芯片/半导体", "游戏", "其他",
 ];
 
-const EMPTY_FORM = { company: "", website: "", industry: "", position: "", location: "", status: "已投递", appliedDate: "", jdUrl: "", notes: "" };
+const EMPTY_FORM = { company: "", website: "", industry: "", position: "", location: "", status: "已投递", appliedDate: "", assessmentDone: false, assessmentUrl: "", interviewTime: "", jdUrl: "", notes: "" };
 
 const sampleData = [
   { id: 1, company: "字节跳动", website: "https://jobs.bytedance.com", industry: "互联网/科技", position: "产品实习生", location: "北京", status: "面试", appliedDate: "2026-05-01", notes: "二面约在下周" },
@@ -423,17 +423,11 @@ function Modal({ title, onClose, onSave, form, setForm }) {
             {/* 智能提示 */}
             {searchMsg && (
               <p className={`mt-1 text-xs flex items-center gap-1 ${
-                searchMsg.startsWith("未找到") || searchMsg.includes("失败") || searchMsg.includes("均失败")
+                searchMsg.startsWith("未找到")
                   ? "text-amber-500"
-                  : searchMsg.includes("查询") || searchMsg.includes("抓取") || searchMsg.includes("连接")
-                    ? "text-blue-500"
-                    : "text-green-600"
+                  : "text-green-600"
               }`}>
-                {(searchMsg.startsWith("正在") || searchMsg.includes("查询")) ? (
-                  <Loader2 size={11} className="animate-spin" />
-                ) : (
-                  <Sparkles size={11} />
-                )}
+                <Sparkles size={11} />
                 {searchMsg}
               </p>
             )}
@@ -535,6 +529,39 @@ function Modal({ title, onClose, onSave, form, setForm }) {
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
               />
             </div>
+          </div>
+
+          {/* 测评 */}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">在线测评</label>
+            <div className="flex items-center gap-3 mb-2">
+              <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.assessmentDone || false}
+                  onChange={(e) => setForm(f => ({ ...f, assessmentDone: e.target.checked }))}
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-200"
+                />
+                已完成
+              </label>
+            </div>
+            <input
+              value={form.assessmentUrl || ""}
+              onChange={handle("assessmentUrl")}
+              placeholder="测评链接（可选）"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+            />
+          </div>
+
+          {/* 面试时间 */}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">面试时间</label>
+            <input
+              type="datetime-local"
+              value={form.interviewTime || ""}
+              onChange={handle("interviewTime")}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+            />
           </div>
 
           <div>
@@ -700,8 +727,9 @@ export default function InternshipTracker() {
                   <th className="text-left px-5 py-3">公司</th>
                   <th className="text-left px-4 py-3">岗位</th>
                   <th className="text-left px-3 py-3">地点</th>
-                  <th className="text-left px-4 py-3">状态</th>
-                  <th className="text-left px-4 py-3">投递日期</th>
+                  <th className="text-left px-3 py-3">状态</th>
+                  <th className="text-left px-3 py-3">面试</th>
+                  <th className="text-left px-3 py-3">投递</th>
                   <th className="text-left px-4 py-3">备注</th>
                   <th className="text-right px-5 py-3">操作</th>
                 </tr>
@@ -730,6 +758,19 @@ export default function InternshipTracker() {
                                 官网 <ExternalLink size={10} />
                               </a>
                             )}
+                            {app.assessmentUrl && (
+                              <a
+                                href={app.assessmentUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className={`text-xs flex items-center gap-0.5 ${
+                                  app.assessmentDone ? "text-emerald-500 hover:text-emerald-600" : "text-orange-400 hover:text-orange-600"
+                                }`}
+                                title={app.assessmentDone ? "测评已完成" : "测评未完成"}
+                              >
+                                测评{app.assessmentDone ? " ✓" : ""} <ExternalLink size={10} />
+                              </a>
+                            )}
                             {app.jdUrl && (
                               <a
                                 href={app.jdUrl}
@@ -751,10 +792,15 @@ export default function InternshipTracker() {
                         <span className="inline-block bg-gray-100 text-gray-600 rounded-full px-2 py-0.5 text-xs">{app.location}</span>
                       ) : <span className="text-gray-300">—</span>}
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-3 py-3.5">
                       <StatusDropdown value={app.status} onChange={v => updateStatus(app.id, v)} />
                     </td>
-                    <td className="px-4 py-3.5 text-gray-500 text-xs">{app.appliedDate || <span className="text-gray-300">—</span>}</td>
+                    <td className="px-3 py-3.5 text-gray-500 text-xs whitespace-nowrap">
+                      {app.interviewTime ? (
+                        <span className="text-indigo-600 font-medium">{app.interviewTime.replace("T", " ").substring(0, 16)}</span>
+                      ) : <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="px-3 py-3.5 text-gray-500 text-xs">{app.appliedDate || <span className="text-gray-300">—</span>}</td>
                     <td className="px-4 py-3.5 text-gray-500 max-w-40 truncate">{app.notes || <span className="text-gray-300">—</span>}</td>
                     <td className="px-5 py-3.5 text-right">
                       <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
