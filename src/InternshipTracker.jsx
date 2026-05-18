@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { Plus, ExternalLink, Trash2, Pencil, X, Check, ChevronDown, Search, Sparkles, Globe, Loader2 } from "lucide-react";
+import { Plus, ExternalLink, Trash2, Pencil, X, Check, ChevronDown, Search, Sparkles } from "lucide-react";
 
 const STATUSES = [
   { value: "待投递",   color: "bg-gray-100 text-gray-600",        dot: "bg-gray-400" },
@@ -19,12 +19,18 @@ const LOCATIONS = [
   "远程", "海外",
 ];
 
-const EMPTY_FORM = { company: "", website: "", position: "", location: "", status: "已投递", appliedDate: "", jdUrl: "", jd: "", notes: "" };
+const INDUSTRIES = [
+  "互联网/科技", "金融", "咨询", "智能制造", "汽车", "新能源",
+  "医疗/医药", "消费品/零售", "教育", "媒体/娱乐", "通信",
+  "芯片/半导体", "游戏", "其他",
+];
+
+const EMPTY_FORM = { company: "", website: "", industry: "", position: "", location: "", status: "已投递", appliedDate: "", jdUrl: "", notes: "" };
 
 const sampleData = [
-  { id: 1, company: "字节跳动", website: "https://jobs.bytedance.com", position: "产品实习生", location: "北京", status: "面试", appliedDate: "2026-05-01", notes: "二面约在下周" },
-  { id: 2, company: "腾讯", website: "https://careers.tencent.com", position: "后端开发实习", location: "深圳", status: "已投递", appliedDate: "2026-05-05", notes: "" },
-  { id: 3, company: "阿里巴巴", website: "https://talent.alibaba.com", position: "数据分析实习", location: "杭州", status: "等待回复", appliedDate: "2026-04-28", notes: "" },
+  { id: 1, company: "字节跳动", website: "https://jobs.bytedance.com", industry: "互联网/科技", position: "产品实习生", location: "北京", status: "面试", appliedDate: "2026-05-01", notes: "二面约在下周" },
+  { id: 2, company: "腾讯", website: "https://careers.tencent.com", industry: "互联网/科技", position: "后端开发实习", location: "深圳", status: "已投递", appliedDate: "2026-05-05", notes: "" },
+  { id: 3, company: "阿里巴巴", website: "https://talent.alibaba.com", industry: "互联网/科技", position: "数据分析实习", location: "杭州", status: "等待回复", appliedDate: "2026-04-28", notes: "" },
 ];
 
 // ───────── 公司名称 ↔ 官网 双向映射 ─────────
@@ -271,186 +277,6 @@ function extractCompanyFromUrl(url) {
   }
 }
 
-// ───────── JD 抓取 ─────────
-
-// ───────── JD 抓取：平台检测 + API 直连 + HTML 兜底 ─────────
-
-const CORS_PROXY = (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-
-// 平台检测 → 返回 { platform, apiCandidates }，每个 candidate 是 { url, method?, body? }
-function detectPlatform(pageUrl) {
-  const u = new URL(pageUrl);
-  const host = u.hostname;
-
-  // ── zhiye.com / 北森 Beisen ──
-  if (host.endsWith("zhiye.com")) {
-    const jobAdId = u.searchParams.get("jobAdId") || u.searchParams.get("id");
-    const origin = u.origin;  // https://hitachienergy.zhiye.com
-    if (jobAdId) {
-      return {
-        platform: "zhiye",
-        apiCandidates: [
-          // 北森 v6 常见内部 API
-          { url: `${origin}/api/Recruit/GetJobAdDetail`, method: "POST", body: JSON.stringify({ jobAdId }) },
-          { url: `${origin}/api/recruit/v2/job/detail`, method: "POST", body: JSON.stringify({ jobAdId }) },
-          { url: `${origin}/api/JobAd/Detail?jobAdId=${encodeURIComponent(jobAdId)}` },
-          { url: `${origin}/api/Intern/GetJobDetail`, method: "POST", body: JSON.stringify({ jobAdId }) },
-          { url: `${origin}/api/Campus/GetJobDetail`, method: "POST", body: JSON.stringify({ jobAdId }) },
-        ],
-      };
-    }
-  }
-
-  // ── Greenhouse ──
-  if (host === "boards.greenhouse.io" || host.endsWith(".greenhouse.io")) {
-    // Greenhouse has a public JSON API: boards.greenhouse.io/embed/job_app?for={company}&token={id}
-    const parts = u.pathname.split("/").filter(Boolean);
-    if (parts.length >= 2) {
-      const company = parts[0];
-      const id = parts[1];
-      return {
-        platform: "greenhouse",
-        apiCandidates: [
-          { url: `https://boards.greenhouse.io/embed/job_app?for=${company}&token=${id}&bust=${Date.now()}` },
-        ],
-      };
-    }
-  }
-
-  // ── Lever ──
-  if (host === "jobs.lever.co") {
-    const parts = u.pathname.split("/").filter(Boolean);
-    if (parts.length >= 2) {
-      return {
-        platform: "lever",
-        apiCandidates: [{ url: `https://jobs.lever.co/${parts[0]}/${parts[1]}?format=json` }],
-      };
-    }
-  }
-
-  // ── Workday / myworkdayjobs ──
-  if (host.endsWith("myworkdayjobs.com")) {
-    return { platform: "workday", apiCandidates: [] };  // Workday 几乎是纯 SPA，无公开 API
-  }
-
-  // ── 未知平台 → 走 HTML 抓取 ──
-  return { platform: "generic", apiCandidates: [{ url: pageUrl }] };
-}
-
-// 解析 Beisen/zhiye API 返回的 JSON
-function parseZhiyeJSON(json) {
-  // 北森 API 返回格式多变，尝试常见字段路径
-  const data = json.Data || json.data || json;
-  const job = data.JobAd || data.jobAd || data.Job || data.job || data;
-  const title = job.JobTitle || job.jobTitle || job.Title || job.title || job.Position || job.Name || "";
-  const descRaw = job.JobDescription || job.jobDescription || job.Description || job.description || job.Requirement || job.Duty || "";
-  const location = job.Location || job.location || job.WorkPlace || job.City || "";
-  // 北森常见：Description 带 HTML 标签
-  const desc = descRaw.replace(/<[^>]*>/g, "\n").replace(/&nbsp;/g, " ").replace(/\n{3,}/g, "\n\n").trim();
-  return { title, desc, location: Array.isArray(location) ? location.join(", ") : location };
-}
-
-// HTML → 文本
-function htmlToText(html) {
-  let cleaned = html
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
-    .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "")
-    .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "")
-    .replace(/<aside[^>]*>[\s\S]*?<\/aside>/gi, "");
-  const jdPatterns = [
-    /<[^>]+class="[^"]*job-description[^"]*"[^>]*>([\s\S]*?)<\//i,
-    /<[^>]+class="[^"]*job-detail[^"]*"[^>]*>([\s\S]*?)<\//i,
-    /<[^>]+class="[^"]*jd-content[^"]*"[^>]*>([\s\S]*?)<\//i,
-    /<[^>]+class="[^"]*description[^"]*"[^>]*>([\s\S]*?)<\//i,
-    /<[^>]+class="[^"]*position-description[^"]*"[^>]*>([\s\S]*?)<\//i,
-    /<[^>]+class="[^"]*job-content[^"]*"[^>]*>([\s\S]*?)<\//i,
-    /<[^>]+class="[^"]*detail-content[^"]*"[^>]*>([\s\S]*?)<\//i,
-  ];
-  for (const re of jdPatterns) {
-    const m = cleaned.match(re);
-    if (m && m[1]) { cleaned = m[1]; break; }
-  }
-  let text = cleaned.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n").replace(/<\/div>/gi, "\n").replace(/<[^>]*>/g, "");
-  text = text.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&nbsp;/g, " ");
-  text = text.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
-  return text.substring(0, 6000);
-}
-
-async function fetchJD(url, { onStart, onDone, onError, onProgress }) {
-  onStart?.();
-  const info = detectPlatform(url);
-
-  // ── Step 1: 尝试平台 API（JSON 响应） ──
-  if (info.apiCandidates.length > 0 && info.platform !== "generic") {
-    for (let i = 0; i < info.apiCandidates.length; i++) {
-      const api = info.apiCandidates[i];
-      onProgress?.(`正在查询 ${info.platform} API (${i + 1}/${info.apiCandidates.length})...`);
-      try {
-        const fetchOpts = { signal: AbortSignal.timeout(10000) };
-        if (api.method === "POST") {
-          fetchOpts.method = "POST";
-          fetchOpts.headers = { "Content-Type": "application/json" };
-          fetchOpts.body = api.body;
-        }
-        // API 请求先直连（部分 API 没有 CORS 限制），失败走代理
-        let resp;
-        try {
-          resp = await fetch(api.url, fetchOpts);
-        } catch { /* 直连失败 */ }
-        if (!resp || !resp.ok) {
-          resp = await fetch(CORS_PROXY(api.url), fetchOpts);
-        }
-        if (!resp.ok) continue;
-        const text = await resp.text();
-        try {
-          const json = JSON.parse(text);
-          const jd = parseZhiyeJSON(json);
-          if (jd.desc || jd.title) {
-            onDone?.({ title: jd.title, text: jd.desc, location: jd.location, url });
-            return;
-          }
-        } catch { /* not JSON */ }
-      } catch { /* 尝试下一个 */ }
-    }
-  }
-
-  // ── Step 2: HTML 抓取兜底 ──
-  if (info.platform === "workday") {
-    onError?.("Workday 页面为纯 SPA，无法自动抓取。请手动复制 JD 粘贴到下方文本区域。");
-    return;
-  }
-
-  onProgress?.("正在抓取页面内容...");
-  try {
-    let resp;
-    try {
-      resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    } catch { /* 直连失败 */ }
-    if (!resp || !resp.ok) {
-      resp = await fetch(CORS_PROXY(url), { signal: AbortSignal.timeout(15000) });
-    }
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const html = await resp.text();
-
-    const titleM = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-    let title = titleM ? titleM[1].replace(/\s+/g, " ").trim() : "";
-    title = title.replace(/\s*[-–|]\s*(校园招聘|社会招聘|实习|校招|社招|Intern|Careers?|Jobs?).*$/i, "").trim();
-
-    const text = htmlToText(html);
-
-    if (!text || text.length < 20) {
-      onError?.("页面为 SPA 动态加载，无法抓取到 JD。请手动复制岗位描述粘贴到下方文本区域。");
-      return;
-    }
-
-    onDone?.({ title, text, url });
-  } catch (e) {
-    onError?.(e.message || "抓取失败，请手动复制粘贴 JD 内容");
-  }
-}
-
 // ───────── 组件 ─────────
 
 function StatusBadge({ value }) {
@@ -498,7 +324,6 @@ function StatusDropdown({ value, onChange }) {
 function Modal({ title, onClose, onSave, form, setForm }) {
   const [searching, setSearching] = useState(false);
   const [searchMsg, setSearchMsg] = useState("");
-  const [scraping, setScraping] = useState(false);
 
   const handle = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
 
@@ -545,37 +370,6 @@ function Modal({ title, onClose, onSave, form, setForm }) {
         setTimeout(() => setSearchMsg(""), 3000);
       }
     }, 300);
-  };
-
-  // JD 抓取
-  const handleScrapeJD = () => {
-    const url = form.jdUrl.trim();
-    if (!url || !url.startsWith("http")) return;
-    fetchJD(url, {
-      onStart: () => {
-        setScraping(true);
-        setSearchMsg("正在连接...");
-      },
-      onProgress: (msg) => {
-        setSearchMsg(msg);
-      },
-      onDone: ({ title, text, location }) => {
-        setScraping(false);
-        setForm(f => ({
-          ...f,
-          jd: text,
-          ...(!f.position.trim() && title ? { position: title } : {}),
-          ...(!f.location.trim() && location ? { location } : {}),
-        }));
-        setSearchMsg(title ? `已抓取：${title.substring(0, 50)}` : "已抓取JD内容");
-        setTimeout(() => setSearchMsg(""), 4000);
-      },
-      onError: (msg) => {
-        setScraping(false);
-        setSearchMsg(msg);
-        setTimeout(() => setSearchMsg(""), 5000);
-      },
-    });
   };
 
   return (
@@ -645,45 +439,41 @@ function Modal({ title, onClose, onSave, form, setForm }) {
             )}
           </div>
 
-          {/* 岗位链接 + 抓取 JD */}
+          {/* 行业 */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">岗位链接</label>
-            <div className="flex gap-2">
-              <input
-                value={form.jdUrl || ""}
-                onChange={handle("jdUrl")}
-                placeholder="粘贴岗位详情页链接..."
-                className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
-              />
-              <button
-                type="button"
-                onClick={handleScrapeJD}
-                disabled={!form.jdUrl?.trim()?.startsWith("http") || scraping}
-                title="抓取岗位描述"
-                className="flex items-center gap-1 px-3 py-2 text-xs font-medium text-purple-600 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-              >
-                {scraping ? (
-                  <Loader2 size={13} className="animate-spin" />
-                ) : (
-                  <Globe size={13} />
-                )}
-                <span className="hidden sm:inline">抓取JD</span>
-              </button>
+            <label className="block text-xs font-medium text-gray-500 mb-1">所属行业</label>
+            <div className="flex flex-wrap gap-1.5 mb-1.5">
+              {INDUSTRIES.map(ind => (
+                <button
+                  key={ind}
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, industry: f.industry === ind ? "" : ind }))}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
+                    form.industry === ind
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                  }`}
+                >
+                  {ind}
+                </button>
+              ))}
             </div>
+            <input
+              value={INDUSTRIES.includes(form.industry) ? "" : form.industry}
+              onChange={(e) => setForm(f => ({ ...f, industry: e.target.value }))}
+              placeholder="或手动输入行业..."
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+            />
           </div>
 
-          {/* 岗位描述 */}
+          {/* 岗位链接 */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">
-              岗位描述
-              {form.jd && <span className="ml-2 text-gray-400 font-normal">({form.jd.length} 字符)</span>}
-            </label>
-            <textarea
-              value={form.jd || ""}
-              onChange={handle("jd")}
-              rows={4}
-              placeholder="可手动粘贴JD，或在上方粘贴链接后点击「抓取JD」自动获取..."
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 resize-y"
+            <label className="block text-xs font-medium text-gray-500 mb-1">岗位链接</label>
+            <input
+              value={form.jdUrl || ""}
+              onChange={handle("jdUrl")}
+              placeholder="粘贴岗位详情页链接..."
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
             />
           </div>
 
@@ -926,7 +716,10 @@ export default function InternshipTracker() {
                         </div>
                         <div>
                           <div className="font-medium text-gray-800">{app.company}</div>
-                          <div className="flex items-center gap-2 mt-0.5">
+                          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                            {app.industry && (
+                              <span className="text-xs bg-gray-100 text-gray-500 rounded-full px-2 py-0.5">{app.industry}</span>
+                            )}
                             {app.website && (
                               <a
                                 href={app.website}
