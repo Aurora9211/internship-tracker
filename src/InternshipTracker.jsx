@@ -27,11 +27,7 @@ const INDUSTRIES = [
 
 const EMPTY_FORM = { company: "", website: "", industry: "", position: "", location: "", status: "已投递", appliedDate: "", assessmentDone: false, assessmentUrl: "", interviewTime: "", jdUrl: "", notes: "" };
 
-const sampleData = [
-  { id: 1, company: "字节跳动", website: "https://jobs.bytedance.com", industry: "互联网/科技", position: "产品实习生", location: "北京", status: "面试", appliedDate: "2026-05-01", notes: "二面约在下周" },
-  { id: 2, company: "腾讯", website: "https://careers.tencent.com", industry: "互联网/科技", position: "后端开发实习", location: "深圳", status: "已投递", appliedDate: "2026-05-05", notes: "" },
-  { id: 3, company: "阿里巴巴", website: "https://talent.alibaba.com", industry: "互联网/科技", position: "数据分析实习", location: "杭州", status: "等待回复", appliedDate: "2026-04-28", notes: "" },
-];
+const sampleData = [];
 
 // ───────── 公司名称 ↔ 官网 双向映射 ─────────
 
